@@ -11,7 +11,7 @@ use super::*;
 
 const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
 
-pub fn generate<'s, Lang>(from: check::Resolved<'s>) -> String
+pub fn generate<'s, Lang>(from: &check::Resolved<'s>) -> String
 where
     Lang: Language + Default + Common,
     check::Enum<'s>: Definition<Lang>,
@@ -21,7 +21,7 @@ where
     let mut gen = Generator::<Lang>::new();
     gen.push_meta();
     gen.push_common();
-    for (name, ty) in from.types {
+    for (name, ty) in &from.types {
         let field_type = &*ty.borrow();
         match &field_type.1 {
             // skip builtins, they are defined by push_common()
