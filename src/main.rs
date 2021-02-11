@@ -20,7 +20,7 @@ struct Opts {
 #[derive(Clone, Copy, Debug)]
 enum Lang {
     Rust,
-    TS,
+    TypeScript,
 }
 impl std::str::FromStr for Lang {
     type Err = &'static str;
@@ -28,7 +28,7 @@ impl std::str::FromStr for Lang {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "rust" => Ok(Lang::Rust),
-            "ts" => Ok(Lang::TS),
+            "ts" => Ok(Lang::TypeScript),
             s => {
                 println!("{}", s);
                 Err("no match")
@@ -40,7 +40,7 @@ impl std::str::FromStr for Lang {
 fn extension(lang: Lang) -> &'static str {
     match lang {
         Lang::Rust => "rs",
-        Lang::TS => "ts",
+        Lang::TypeScript => "ts",
     }
 }
 
@@ -70,7 +70,7 @@ fn run_one(path: String, lang: Lang) -> Result<Schema> {
         path: PathBuf::from(path.clone()),
         generated: match lang {
             Lang::Rust => pkt::compile::<pkt::gen::rust::Rust>(&fs::read_to_string(path)?)?,
-            Lang::TS => pkt::compile::<pkt::gen::ts::TypeScript>(&fs::read_to_string(path)?)?,
+            Lang::TypeScript => pkt::compile::<pkt::gen::ts::TypeScript>(&fs::read_to_string(path)?)?,
             //_ => return println!("not implemented"),
         },
     })
