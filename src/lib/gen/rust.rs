@@ -96,7 +96,6 @@ fn gen_write_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _: &str) {
         let fty = &*f.r#type.borrow();
 
         use check::ResolvedType::*;
-        // TODO: maybe use arena allocator
         let mut by_ref = false;
         let mut generator: Box<dyn Fn(&mut GenCtx)> = match &fty.1 {
             Builtin(fty_info) => Box::new(move |ctx| gen_write_impl_builtin(ctx, &fty_info, &fty.0)),
@@ -220,7 +219,6 @@ fn gen_read_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
         let fty = &*f.r#type.borrow();
 
         use check::ResolvedType::*;
-        // TODO: maybe use arena allocator
         let tyname = resolve_typename(fty.0).unwrap_or(fty.0);
         let mut generator: Box<dyn Fn(&mut GenCtx)> = match &fty.1 {
             Builtin(fty_info) => Box::new(move |ctx| gen_read_impl_builtin(ctx, &fty_info, fty.0)),

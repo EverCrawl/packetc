@@ -18,9 +18,7 @@ impl Common for TypeScript {
 }
 
 fn varname(stack: &[String], name: &str) -> String { format!("{}_{}", stack.join("_"), name) }
-
 fn bindname(stack: &[String]) -> String { stack.join("_") }
-
 fn fname(stack: &[String]) -> String { stack.join(".") }
 
 fn gen_write_impl_optional(ctx: &mut GenCtx, body: impl Fn(&mut GenCtx)) {
@@ -50,15 +48,18 @@ fn gen_write_impl_optional(ctx: &mut GenCtx, body: impl Fn(&mut GenCtx)) {
 
 fn gen_write_impl_array(ctx: &mut GenCtx, body: impl Fn(&mut GenCtx)) {
     let fname = self::fname(&ctx.stack);
-    let item_var = varname(&ctx.stack, "item");
+    let item = varname(&ctx.stack, "item");
+    let index = varname(&ctx.stack, "index");
     let mut old_stack = Vec::new();
     ctx.swap_stack(&mut old_stack);
-    ctx.push_fname(item_var.clone());
+    ctx.push_fname(item.clone());
 
     // TODO: use index-based for loop instead
     cat!(ctx, "writer.write_uint32({fname}.length);\n");
-    cat!(ctx, "for (let {item_var} of {fname}) {{\n");
+    cat!(ctx, "for (let {index} = 0; {index} < {fname}.length; ++{index}) {{\n");
+    //cat!(ctx, "for (let {item} of {fname}) {{\n");
     cat!(ctx +++);
+    cat!(ctx, "let {item} = {fname}[{index}];\n");
 
     body(ctx);
 
@@ -96,7 +97,6 @@ fn gen_write_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
         let fty = &*f.r#type.borrow();
 
         use check::ResolvedType::*;
-        // TODO: maybe use arena allocator
         let mut generator: Box<dyn Fn(&mut GenCtx)> = match &fty.1 {
             Builtin(fty_info) => Box::new(move |ctx| gen_write_impl_builtin(ctx, &fty_info, &fty.0)),
             Enum(fty_info) => Box::new(move |ctx| gen_write_impl_enum(ctx, &fty_info, &fty.0)),
@@ -218,7 +218,6 @@ fn gen_read_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
         let fty = &*f.r#type.borrow();
 
         use check::ResolvedType::*;
-        // TODO: maybe use arena allocator
         let mut init_item = false;
         let mut generator: Rc<dyn Fn(&mut GenCtx)> = match &fty.1 {
             Builtin(fty_info) => Rc::new(move |ctx| gen_read_impl_builtin(ctx, &fty_info, &fty.0)),
@@ -574,7 +573,8 @@ export function write(writer: Writer, input: Test) {
         default: {
             writer.write_uint8(1);
             writer.write_uint32(input_b.length);
-            for (let input_b_item of input_b) {
+            for (let input_b_index = 0; input_b_index < input_b.length; ++input_b_index) {
+                let input_b_item = input_b[input_b_index];
                 writer.write_uint8(input_b_item);
             }
         }
@@ -663,13 +663,16 @@ export function read(reader: Reader, output: Test) {
             "
 export function write(writer: Writer, input: TestB) {
     writer.write_uint32(input.test_a.length);
-    for (let input_test_a_item of input.test_a) {
+    for (let input_test_a_index = 0; input_test_a_index < input.test_a.length; ++input_test_a_index) {
+        let input_test_a_item = input.test_a[input_test_a_index];
         writer.write_uint32(input_test_a_item.first.length);
-        for (let input_test_a_item_first_item of input_test_a_item.first) {
+        for (let input_test_a_item_first_index = 0; input_test_a_item_first_index < input_test_a_item.first.length; ++input_test_a_item_first_index) {
+            let input_test_a_item_first_item = input_test_a_item.first[input_test_a_item_first_index];
             writer.write_uint8(input_test_a_item_first_item);
         }
         writer.write_uint32(input_test_a_item.second.length);
-        for (let input_test_a_item_second_item of input_test_a_item.second) {
+        for (let input_test_a_item_second_index = 0; input_test_a_item_second_index < input_test_a_item.second.length; ++input_test_a_item_second_index) {
+            let input_test_a_item_second_item = input_test_a_item.second[input_test_a_item_second_index];
             writer.write_uint8(input_test_a_item_second_item);
         }
     }
@@ -847,25 +850,29 @@ export function read(reader: Reader, output: TestB) {
 export function write(writer: Writer, input: Test) {
     writer.write_uint8(input.builtin_scalar);
     writer.write_uint32(input.builtin_array.length);
-    for (let input_builtin_array_item of input.builtin_array) {
+    for (let input_builtin_array_index = 0; input_builtin_array_index < input.builtin_array.length; ++input_builtin_array_index) {
+        let input_builtin_array_item = input.builtin_array[input_builtin_array_index];
         writer.write_uint8(input_builtin_array_item);
     }
     writer.write_uint32(input.string_scalar.length);
     writer.write_string(input.string_scalar);
     writer.write_uint32(input.string_array.length);
-    for (let input_string_array_item of input.string_array) {
+    for (let input_string_array_index = 0; input_string_array_index < input.string_array.length; ++input_string_array_index) {
+        let input_string_array_item = input.string_array[input_string_array_index];
         writer.write_uint32(input_string_array_item.length);
         writer.write_string(input_string_array_item);
     }
     writer.write_uint8(input.enum_scalar as number);
     writer.write_uint32(input.enum_array.length);
-    for (let input_enum_array_item of input.enum_array) {
+    for (let input_enum_array_index = 0; input_enum_array_index < input.enum_array.length; ++input_enum_array_index) {
+        let input_enum_array_item = input.enum_array[input_enum_array_index];
         writer.write_uint8(input_enum_array_item as number);
     }
     writer.write_float(input.struct_scalar.x);
     writer.write_float(input.struct_scalar.y);
     writer.write_uint32(input.struct_array.length);
-    for (let input_struct_array_item of input.struct_array) {
+    for (let input_struct_array_index = 0; input_struct_array_index < input.struct_array.length; ++input_struct_array_index) {
+        let input_struct_array_item = input.struct_array[input_struct_array_index];
         writer.write_float(input_struct_array_item.x);
         writer.write_float(input_struct_array_item.y);
     }
@@ -1120,7 +1127,8 @@ export function read(reader: Reader, output: Test) {
 export function write(writer: Writer, input: State) {
     writer.write_uint32(input.id);
     writer.write_uint32(input.entities.length);
-    for (let input_entities_item of input.entities) {
+    for (let input_entities_index = 0; input_entities_index < input.entities.length; ++input_entities_index) {
+        let input_entities_item = input.entities[input_entities_index];
         writer.write_uint32(input_entities_item.uid);
         let input_entities_item_pos = input_entities_item.pos;
         switch (input_entities_item_pos) {
