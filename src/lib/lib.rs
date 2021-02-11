@@ -53,5 +53,5 @@ where
         Ok(r) => r,
         Err(e) => return Err(Error::Check(e)),
     };
-    Ok(gen::generate::<Lang>(resolved))
+    Ok(gen::generate::<Lang>(&resolved))
 }

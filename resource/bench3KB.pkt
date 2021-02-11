@@ -1,0 +1,176 @@
+Wzqwz:struct {
+    IMPC_X: int8[],
+    KE: uint32[],
+    SRGZI: uint8,
+    QO: float,
+    I_OCE: int16,
+    RCS73: int32,
+    NX: uint16,
+    PC: string}
+
+Tzgnhk:enum { ewaoJ8  ,ky4g
+,sDdFa_
+ ,n0F
+,kBv }
+Hqmhf5: struct {    AUBCLL: int8,
+    AULRT: float,
+    E5: string,
+    F9: Wzqwz,
+    _FTJ0T: int32,
+    EFSFI: int16[],
+    LFVDHC: uint16,
+    FH: uint32,
+    APL: Tzgnhk,
+    OVCO: uint8[]}
+
+Izs9z:enum{
+
+i98Lw0,wJFo}
+Nayisb: struct{
+     FZRAB: string,
+    BKLO: float,
+    KAM: uint8,
+    Y_LSJ: Wzqwz,
+    F0CQLA: Izs9z,
+    CN: int32,
+    W_SBT3: uint32[],
+    FGMK: int16,
+    KG: int8[],
+    QYFEIK: Tzgnhk,
+    FG8BCL: Hqmhf5,
+    O2HPH: uint16}
+
+Qa5p8e: struct{    WDM48: uint8[],
+    IH5J: uint16,
+    ZJ: int32,
+    _8: uint32,
+    _Q: Izs9z[],
+    HRVM0: Tzgnhk,
+    LYD: Nayisb[],
+    JDQA: float,
+    MD_: string,
+    VIPDA: Wzqwz,
+    PT: int16,
+    FIRF: int8,
+    IFX: Hqmhf5[]}
+H8qle:struct{    AK9B: Nayisb,
+    NFAD: Wzqwz,
+    X55: Hqmhf5,
+    MKHMM: uint16}
+Sfkd2e:struct {
+     EGBSGC: Wzqwz,
+    TGLJTL: string,
+    EHHM: Hqmhf5,
+    U5TS: Nayisb,
+    HZYF: int8[],
+    JTI_OX: float,
+    F9ILR: uint32,
+    GMUGXP: uint8,
+    QMOEU: uint16,
+    DVWCHP: Qa5p8e,
+    _VJTRF: int16,
+    UFN: H8qle,
+    YF: Izs9z,
+    WDH: Tzgnhk,
+    XB2HKJ: int32}
+Kulecr:struct{     ZLW: string,
+    G80: int8,
+    TX: int16,
+    ZHYGX: uint16,
+    Z18_L: Tzgnhk,
+    FQEYF: float,
+    ESW1V9: uint8,
+    SQQ_X9: Nayisb[],
+    JZ4: Hqmhf5,
+    YYSA: int32[],
+    GF5HI: Izs9z[],
+    G9: uint32,
+    TJHB: Sfkd2e,
+    UDGRO: H8qle[],
+    A8ZDFT: Wzqwz,
+    A2QS: Qa5p8e}
+Ps: struct {      KBIE6: H8qle,
+    SVCT: uint8,
+    TAQHQ: int32[],
+    RI: Nayisb,
+    SLAK: uint32[],
+    JD: Kulecr,
+    THB: Sfkd2e,
+    JZPAX: uint16,
+    PH5CO: int16,
+    VJF: Hqmhf5[],
+    FN: Tzgnhk,
+    L0: string,
+    YEO: int8,
+    UY7VI: Wzqwz,
+    BA: Izs9z,
+    PB2WD: float,
+    F4Z9Q: Qa5p8e}
+
+Ytrh_:struct{
+     DTQW: H8qle,
+    DV_FCE: Qa5p8e,
+    HUNW7Q: int32[],
+    DU: string[],
+    BY: Ps,
+    FIW8: Kulecr,
+    _AMLSH: uint16,
+    TSC7X0: Izs9z,
+    LPU: int8,
+    XX0ALA: Hqmhf5,
+    AGOSLC: Sfkd2e,
+    GBU: int16,
+    XDE: Tzgnhk,
+    UUQ: Wzqwz,
+    KHQIX: Nayisb,
+    AHVCLZ: uint8[],
+    NI: float[],
+    HP: uint32}
+#
+Qp:enum{gnASL7,ug2i6S
+,hcL8f
+,tIgzW,yr2t1 ,q6,p14CIK ,qY ,eNp6xg,tI8C,_dUY
+,nZu0W
+ ,u5anu7  ,h3
+,mMU4 ,ogRr5  ,u0d_D1 ,eeC ,nL ,sEEA  ,pK
+}
+Gslci: enum{
+iyjlP,ue,bpUS,opx,sRd  ,wKE ,h3,cV_x ,m9HNYX  ,h0  ,rjbr
+,tpaxdR ,aWk
+,vrAt1  }
+
+Tsd: struct {     WTWV: Kulecr,
+    ZLA: int16,
+    IRP: int8,
+    ACW: Tzgnhk,
+    NVIUEO: Wzqwz,
+    FV_: Gslci[],
+    FEN62M: Ps,
+    D8N: uint8,
+    GV: float[],
+    XRET: Izs9z[],
+    P1WO: H8qle}
+Sff6: struct {    HO1ZK: int32,
+    RT: int8,
+    FR7: string[],
+    ZK: Kulecr,
+    POOLQ: Qa5p8e,
+    SIK: H8qle,
+    A4QQV: Qp,
+    YKAZ: Gslci,
+    S1: float,
+    I2ONB: int16,
+    EGC: Ytrh_,
+    JJ: Izs9z,
+    BF: Tzgnhk,
+    PF: Wzqwz[],
+    B_I: Ps[],
+    BPOC: uint32,
+    XBV: Hqmhf5,
+    GM: Nayisb,
+    DDOUI: uint8,
+    C0: uint16,
+    NA: Sfkd2e,
+    OXFI: Tsd}
+
+export Sff6
