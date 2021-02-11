@@ -1,6 +1,6 @@
 [package]
 name = "packetc"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["jprochazk <honza.spacir@gmail.com>"]
 edition = "2018"
 

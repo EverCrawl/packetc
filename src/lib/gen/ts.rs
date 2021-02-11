@@ -1,11 +1,9 @@
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use fstrings::format_args_f;
 
 use super::*;
-
-// TODO: use (proc?) macros or some template syntax to clean up all of this
-// duplicated code. TODO: change all for..of loops to for (i=0;i<len;++i) loops
 
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct TypeScript {
@@ -25,7 +23,32 @@ fn bindname(stack: &[String]) -> String { stack.join("_") }
 
 fn fname(stack: &[String]) -> String { stack.join(".") }
 
-fn gen_write_impl_builtin_array(ctx: &mut GenCtx, ty: &check::Builtin, name: &str) {
+fn gen_write_impl_optional(ctx: &mut GenCtx, body: impl Fn(&mut GenCtx)) {
+    let fname = self::fname(&ctx.stack);
+    let bind_var = bindname(&ctx.stack);
+    let mut old_stack = Vec::new();
+    ctx.swap_stack(&mut old_stack);
+    ctx.push_fname(bind_var.clone());
+
+    cat!(ctx, "let {bind_var} = {fname};\n");
+    cat!(ctx, "switch ({bind_var}) {{\n");
+    cat!(ctx +++);
+    cat!(ctx, "case undefined: case null: writer.write_uint8(0); break;\n");
+    cat!(ctx, "default: {{\n");
+    cat!(ctx +++);
+    cat!(ctx, "writer.write_uint8(1);\n");
+
+    body(ctx);
+
+    cat!(ctx ---);
+    cat!(ctx, "}}\n");
+    cat!(ctx ---);
+    cat!(ctx, "}}\n");
+
+    ctx.swap_stack(&mut old_stack);
+}
+
+fn gen_write_impl_array(ctx: &mut GenCtx, body: impl Fn(&mut GenCtx)) {
     let fname = self::fname(&ctx.stack);
     let item_var = varname(&ctx.stack, "item");
     let mut old_stack = Vec::new();
@@ -37,13 +60,7 @@ fn gen_write_impl_builtin_array(ctx: &mut GenCtx, ty: &check::Builtin, name: &st
     cat!(ctx, "for (let {item_var} of {fname}) {{\n");
     cat!(ctx +++);
 
-    match ty {
-        check::Builtin::String => {
-            cat!(ctx, "writer.write_uint32({item_var}.length);\n");
-            cat!(ctx, "writer.write_string({item_var});\n");
-        }
-        _ => cat!(ctx, "writer.write_{name}({item_var});\n"),
-    }
+    body(ctx);
 
     cat!(ctx ---);
     cat!(ctx, "}}\n");
@@ -62,32 +79,7 @@ fn gen_write_impl_builtin(ctx: &mut GenCtx, ty: &check::Builtin, name: &str) {
     }
 }
 
-fn gen_write_impl_enum_array(ctx: &mut GenCtx, ty: &check::Enum, _: &str) {
-    let fname = self::fname(&ctx.stack);
-    let item_var = varname(&ctx.stack, "item");
-    let mut old_stack = Vec::new();
-    ctx.swap_stack(&mut old_stack);
-    ctx.push_fname(item_var.clone());
-
-    let repr_name = match &ty.repr {
-        check::EnumRepr::U8 => "uint8",
-        check::EnumRepr::U16 => "uint16",
-        check::EnumRepr::U32 => "uint32",
-    };
-    let itemfname = self::fname(&ctx.stack);
-
-    // TODO: use index-based for loop instead
-    cat!(ctx, "writer.write_uint32({fname}.length);\n");
-    cat!(ctx, "for (let {item_var} of {fname}) {{\n");
-    cat!(ctx +++);
-    cat!(ctx, "writer.write_{repr_name}({itemfname} as number);\n");
-    cat!(ctx ---);
-    cat!(ctx, "}}\n");
-
-    ctx.swap_stack(&mut old_stack);
-}
-
-fn gen_write_impl_enum(ctx: &mut GenCtx, type_info: &check::Enum, _: &str) {
+fn gen_write_impl_enum(ctx: &mut GenCtx, type_info: &check::Enum, _name: &str) {
     let fname = self::fname(&ctx.stack);
     let repr_name = match &type_info.repr {
         check::EnumRepr::U8 => "uint8",
@@ -98,83 +90,26 @@ fn gen_write_impl_enum(ctx: &mut GenCtx, type_info: &check::Enum, _: &str) {
     cat!(ctx, "writer.write_{repr_name}({fname} as number);\n");
 }
 
-fn gen_write_impl_struct_array(ctx: &mut GenCtx, ty: &check::Struct, _: &str) {
-    let fname = self::fname(&ctx.stack);
-    let item_var = varname(&ctx.stack, "item");
-    let mut old_stack = Vec::new();
-    ctx.swap_stack(&mut old_stack);
-    ctx.push_fname(item_var.clone());
-
-    // TODO: use index-based for loop instead
-    cat!(ctx, "writer.write_uint32({fname}.length);\n");
-    cat!(ctx, "for (let {item_var} of {fname}) {{\n");
-    cat!(ctx +++);
-
+fn gen_write_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
     for f in &ty.fields {
         ctx.push_fname(f.name);
         let fty = &*f.r#type.borrow();
 
         use check::ResolvedType::*;
-        match &fty.1 {
-            Builtin(fty_info) if f.array => gen_write_impl_builtin_array(ctx, &fty_info, &fty.0),
-            Builtin(fty_info) => gen_write_impl_builtin(ctx, &fty_info, &fty.0),
-            Enum(fty_info) if f.array => gen_write_impl_enum_array(ctx, &fty_info, &fty.0),
-            Enum(fty_info) => gen_write_impl_enum(ctx, &fty_info, &fty.0),
-            Struct(fty_info) if f.array => gen_write_impl_struct_array(ctx, &fty_info, &fty.0),
-            Struct(fty_info) => gen_write_impl_struct(ctx, &fty_info, &fty.0),
-        }
-        ctx.pop_fname();
-    }
-
-    cat!(ctx ---);
-    cat!(ctx, "}}\n");
-
-    ctx.swap_stack(&mut old_stack);
-}
-
-fn gen_write_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _: &str) {
-    for f in &ty.fields {
-        ctx.push_fname(f.name);
-        let mut old_stack = if f.optional {
-            let fname = self::fname(&ctx.stack);
-            let bind_var = bindname(&ctx.stack);
-            let mut old_stack = Vec::new();
-            ctx.swap_stack(&mut old_stack);
-            ctx.push_fname(bind_var.clone());
-
-            cat!(ctx, "let {bind_var} = {fname};\n");
-            cat!(ctx, "switch ({bind_var}) {{\n");
-            cat!(ctx +++);
-            cat!(ctx, "case undefined: case null: writer.write_uint8(0); break;\n");
-            cat!(ctx, "default: {{\n");
-            cat!(ctx +++);
-            cat!(ctx, "writer.write_uint8(1);\n");
-
-            Some(old_stack)
-        } else {
-            None
+        // TODO: maybe use arena allocator
+        let mut generator: Box<dyn Fn(&mut GenCtx)> = match &fty.1 {
+            Builtin(fty_info) => Box::new(move |ctx| gen_write_impl_builtin(ctx, &fty_info, &fty.0)),
+            Enum(fty_info) => Box::new(move |ctx| gen_write_impl_enum(ctx, &fty_info, &fty.0)),
+            Struct(fty_info) => Box::new(move |ctx| gen_write_impl_struct(ctx, &fty_info, &fty.0)),
         };
-
-        let fty = &*f.r#type.borrow();
-
-        use check::ResolvedType::*;
-        match &fty.1 {
-            Builtin(fty_info) if f.array => gen_write_impl_builtin_array(ctx, &fty_info, &fty.0),
-            Builtin(fty_info) => gen_write_impl_builtin(ctx, &fty_info, &fty.0),
-            Enum(fty_info) if f.array => gen_write_impl_enum_array(ctx, &fty_info, &fty.0),
-            Enum(fty_info) => gen_write_impl_enum(ctx, &fty_info, &fty.0),
-            Struct(fty_info) if f.array => gen_write_impl_struct_array(ctx, &fty_info, &fty.0),
-            Struct(fty_info) => gen_write_impl_struct(ctx, &fty_info, &fty.0),
+        if f.array {
+            generator = Box::new(move |ctx| gen_write_impl_array(ctx, |ctx| generator(ctx)))
         }
-
-        if old_stack.is_some() {
-            cat!(ctx ---);
-            cat!(ctx, "}}\n");
-            cat!(ctx ---);
-            cat!(ctx, "}}\n");
-
-            ctx.swap_stack(old_stack.as_mut().unwrap());
+        if f.optional {
+            generator = Box::new(move |ctx| gen_write_impl_optional(ctx, |ctx| generator(ctx)))
         }
+        generator(ctx);
+
         ctx.pop_fname();
     }
 }
@@ -192,110 +127,39 @@ impl<'a> WriteImpl<TypeScript> for check::Export<'a> {
     }
 }
 
-fn gen_read_impl_builtin_array(ctx: &mut GenCtx, type_info: &check::Builtin, type_name: &str) {
-    let len_var = varname(&ctx.stack, "len");
+fn gen_read_impl_optional(ctx: &mut GenCtx, init_item: bool, body: impl Fn(&mut GenCtx)) {
     let fname = self::fname(&ctx.stack);
-    let out_var = fname.clone();
-    let idx_var = varname(&ctx.stack, "index");
-    let item_var = varname(&ctx.stack, "item");
-    let mut old_stack = Vec::new();
-    ctx.swap_stack(&mut old_stack);
-    ctx.push_fname(item_var);
+    let bind_var = bindname(&ctx.stack);
+    let old_stack = if init_item {
+        let mut old_stack = Vec::new();
+        ctx.swap_stack(&mut old_stack);
+        ctx.push_fname(bind_var.clone());
 
-    cat!(ctx, "let {len_var} = reader.read_uint32();\n");
-    cat!(ctx, "{fname} = new Array({len_var});\n");
-    cat!(ctx, "for (let {idx_var} = 0; {idx_var} < {len_var}; ++{idx_var}) {{\n");
+        Some(old_stack)
+    } else {
+        None
+    };
+
+    cat!(ctx, "if (reader.read_uint8() > 0) {{\n");
     cat!(ctx +++);
-
-    match type_info {
-        check::Builtin::String => {
-            let len_var = varname(&ctx.stack, "len");
-            cat!(ctx, "let {len_var} = reader.read_uint32();\n");
-            cat!(ctx, "{out_var}[{idx_var}] = reader.read_string({len_var});\n");
-        }
-        _ => cat!(ctx, "{out_var}[{idx_var}] = reader.read_{type_name}();\n"),
+    if init_item {
+        cat!(ctx, "let {bind_var}: any = {{}};\n")
     }
 
+    body(ctx);
+
+    if init_item {
+        cat!(ctx, "{fname} = {bind_var};\n");
+    }
     cat!(ctx ---);
     cat!(ctx, "}}\n");
 
-    ctx.swap_stack(&mut old_stack);
-}
-
-fn gen_read_impl_builtin(ctx: &mut GenCtx, type_info: &check::Builtin, type_name: &str, optional: bool) {
-    if optional {
-        cat!(ctx, "if (reader.read_uint8() > 0) {{\n");
-        cat!(ctx +++);
-    }
-    match type_info {
-        check::Builtin::String => {
-            let len_var = varname(&ctx.stack, "len");
-            cat!(ctx, "let {len_var} = reader.read_uint32();\n");
-            let fname = self::fname(&ctx.stack);
-            cat!(ctx, "{fname} = reader.read_string({len_var});\n");
-        }
-        _ => {
-            let fname = self::fname(&ctx.stack);
-            cat!(ctx, "{fname} = reader.read_{type_name}();\n")
-        }
-    }
-    if optional {
-        cat!(ctx ---);
-        cat!(ctx, "}}\n");
+    if let Some(mut old_stack) = old_stack {
+        ctx.swap_stack(&mut old_stack);
     }
 }
 
-fn gen_read_impl_enum_array(ctx: &mut GenCtx, type_info: &check::Enum, type_name: &str) {
-    let len_var = varname(&ctx.stack, "len");
-    let fname = self::fname(&ctx.stack);
-    let out_var = fname.clone();
-    let idx_var = varname(&ctx.stack, "index");
-    let item_var = varname(&ctx.stack, "item");
-    let mut old_stack = Vec::new();
-    ctx.swap_stack(&mut old_stack);
-    ctx.push_fname(item_var);
-
-    let repr_name = match type_info.repr {
-        check::EnumRepr::U8 => "uint8",
-        check::EnumRepr::U16 => "uint16",
-        check::EnumRepr::U32 => "uint32",
-    };
-
-    cat!(ctx, "let {len_var} = reader.read_uint32();\n");
-    cat!(ctx, "{fname} = new Array({len_var});\n");
-    cat!(ctx, "for (let {idx_var} = 0; {idx_var} < {len_var}; ++{idx_var}) {{\n");
-    cat!(ctx +++);
-    cat!(
-        ctx,
-        "{out_var}[{idx_var}] = {type_name}_try_from(reader.read_{repr_name}());\n"
-    );
-    cat!(ctx ---);
-    cat!(ctx, "}}\n");
-
-    ctx.swap_stack(&mut old_stack);
-}
-
-fn gen_read_impl_enum(ctx: &mut GenCtx, type_info: &check::Enum, type_name: &str, optional: bool) {
-    if optional {
-        cat!(ctx, "if (reader.read_uint8() > 0) {{\n");
-        cat!(ctx +++);
-    }
-
-    let repr_name = match type_info.repr {
-        check::EnumRepr::U8 => "uint8",
-        check::EnumRepr::U16 => "uint16",
-        check::EnumRepr::U32 => "uint32",
-    };
-    let fname = self::fname(&ctx.stack);
-    cat!(ctx, "{fname} = {type_name}_try_from(reader.read_{repr_name}());\n");
-
-    if optional {
-        cat!(ctx ---);
-        cat!(ctx, "}}\n");
-    }
-}
-
-fn gen_read_impl_struct_array(ctx: &mut GenCtx, ty: &check::Struct, _: &str) {
+fn gen_read_impl_array(ctx: &mut GenCtx, init_item: bool, body: impl Fn(&mut GenCtx)) {
     let len_var = varname(&ctx.stack, "len");
     let fname = self::fname(&ctx.stack);
     let idx_var = varname(&ctx.stack, "index");
@@ -308,22 +172,13 @@ fn gen_read_impl_struct_array(ctx: &mut GenCtx, ty: &check::Struct, _: &str) {
     cat!(ctx, "{fname} = new Array({len_var});\n");
     cat!(ctx, "for (let {idx_var} = 0; {idx_var} < {len_var}; ++{idx_var}) {{\n");
     cat!(ctx +++);
-    cat!(ctx, "let {item_var}: any = {{}};\n");
-
-    for f in &ty.fields {
-        ctx.push_fname(f.name);
-        let fty = &*f.r#type.borrow();
-        use check::ResolvedType::*;
-        match &fty.1 {
-            Builtin(fty_info) if f.array => gen_read_impl_builtin_array(ctx, &fty_info, &fty.0),
-            Builtin(fty_info) => gen_read_impl_builtin(ctx, &fty_info, &fty.0, f.optional),
-            Enum(fty_info) if f.array => gen_read_impl_enum_array(ctx, &fty_info, &fty.0),
-            Enum(fty_info) => gen_read_impl_enum(ctx, &fty_info, &fty.0, f.optional),
-            Struct(fty_info) if f.array => gen_read_impl_struct_array(ctx, &fty_info, &fty.0),
-            Struct(fty_info) => gen_read_impl_struct(ctx, &fty_info, &fty.0, f.optional),
-        }
-        ctx.pop_fname();
+    if init_item {
+        cat!(ctx, "let {item_var}: any = {{}};\n");
+    } else {
+        cat!(ctx, "let {item_var};\n");
     }
+
+    body(ctx);
 
     cat!(ctx, "{fname}[{idx_var}] = {item_var};\n");
     cat!(ctx ---);
@@ -332,45 +187,57 @@ fn gen_read_impl_struct_array(ctx: &mut GenCtx, ty: &check::Struct, _: &str) {
     ctx.swap_stack(&mut old_stack);
 }
 
-fn gen_read_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, name: &str, optional: bool) {
-    let (old_stack, fname, bind_var) = if optional {
-        let fname = self::fname(&ctx.stack);
-        let bind_var = bindname(&ctx.stack);
-        let mut old_stack = Vec::new();
-        ctx.swap_stack(&mut old_stack);
-        ctx.push_fname(bind_var.clone());
+fn gen_read_impl_builtin(ctx: &mut GenCtx, type_info: &check::Builtin, type_name: &str) {
+    match type_info {
+        check::Builtin::String => {
+            let len_var = varname(&ctx.stack, "len");
+            cat!(ctx, "let {len_var} = reader.read_uint32();\n");
+            let fname = self::fname(&ctx.stack);
+            cat!(ctx, "{fname} = reader.read_string({len_var});\n");
+        }
+        _ => {
+            let fname = self::fname(&ctx.stack);
+            cat!(ctx, "{fname} = reader.read_{type_name}();\n")
+        }
+    }
+}
 
-        cat!(ctx, "if (reader.read_uint8() > 0) {{\n");
-        cat!(ctx +++);
-        cat!(ctx, "let {bind_var} = {{}} as unknown as {name};\n");
-
-        (Some(old_stack), fname, bind_var)
-    } else {
-        (None, String::new(), String::new())
+fn gen_read_impl_enum(ctx: &mut GenCtx, type_info: &check::Enum, type_name: &str) {
+    let repr_name = match type_info.repr {
+        check::EnumRepr::U8 => "uint8",
+        check::EnumRepr::U16 => "uint16",
+        check::EnumRepr::U32 => "uint32",
     };
+    let fname = self::fname(&ctx.stack);
+    cat!(ctx, "{fname} = {type_name}_try_from(reader.read_{repr_name}());\n");
+}
 
+fn gen_read_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
     for f in &ty.fields {
         ctx.push_fname(f.name);
         let fty = &*f.r#type.borrow();
 
         use check::ResolvedType::*;
-        match &fty.1 {
-            Builtin(fty_info) if f.array => gen_read_impl_builtin_array(ctx, &fty_info, &fty.0),
-            Builtin(fty_info) => gen_read_impl_builtin(ctx, &fty_info, &fty.0, f.optional),
-            Enum(fty_info) if f.array => gen_read_impl_enum_array(ctx, &fty_info, &fty.0),
-            Enum(fty_info) => gen_read_impl_enum(ctx, &fty_info, &fty.0, f.optional),
-            Struct(fty_info) if f.array => gen_read_impl_struct_array(ctx, &fty_info, &fty.0),
-            Struct(fty_info) => gen_read_impl_struct(ctx, &fty_info, &fty.0, f.optional),
+        // TODO: maybe use arena allocator
+        let mut init_item = false;
+        let mut generator: Rc<dyn Fn(&mut GenCtx)> = match &fty.1 {
+            Builtin(fty_info) => Rc::new(move |ctx| gen_read_impl_builtin(ctx, &fty_info, &fty.0)),
+            Enum(fty_info) => Rc::new(move |ctx| gen_read_impl_enum(ctx, &fty_info, &fty.0)),
+            Struct(fty_info) => {
+                init_item = true;
+                Rc::new(move |ctx| gen_read_impl_struct(ctx, &fty_info, &fty.0))
+            }
+        };
+        if f.array {
+            let current_generator = generator.clone();
+            generator = Rc::new(move |ctx| gen_read_impl_array(ctx, init_item, |ctx| current_generator(ctx)))
         }
+        if f.optional {
+            let current_generator = generator.clone();
+            generator = Rc::new(move |ctx| gen_read_impl_optional(ctx, init_item, |ctx| current_generator(ctx)))
+        }
+        generator(ctx);
         ctx.pop_fname();
-    }
-
-    if let Some(mut old_stack) = old_stack {
-        cat!(ctx, "{fname} = {bind_var};\n");
-        cat!(ctx ---);
-        cat!(ctx, "}}\n");
-
-        ctx.swap_stack(&mut old_stack);
     }
 }
 
@@ -381,7 +248,7 @@ impl<'a> ReadImpl<TypeScript> for check::Export<'a> {
         ctx.push_fname("output");
         cat!(ctx, "export function read(reader: Reader, output: {name}) {{\n");
         cat!(ctx +++);
-        gen_read_impl_struct(&mut ctx, &self.r#struct, &name, false);
+        gen_read_impl_struct(&mut ctx, &self.r#struct, &name);
         cat!(ctx ---);
         cat!(ctx, "}}\n");
     }
@@ -856,12 +723,16 @@ export function read(reader: Reader, output: TestB) {
         let output_test_a_item_first_len = reader.read_uint32();
         output_test_a_item.first = new Array(output_test_a_item_first_len);
         for (let output_test_a_item_first_index = 0; output_test_a_item_first_index < output_test_a_item_first_len; ++output_test_a_item_first_index) {
-            output_test_a_item.first[output_test_a_item_first_index] = reader.read_uint8();
+            let output_test_a_item_first_item;
+            output_test_a_item_first_item = reader.read_uint8();
+            output_test_a_item.first[output_test_a_item_first_index] = output_test_a_item_first_item;
         }
         let output_test_a_item_second_len = reader.read_uint32();
         output_test_a_item.second = new Array(output_test_a_item_second_len);
         for (let output_test_a_item_second_index = 0; output_test_a_item_second_index < output_test_a_item_second_len; ++output_test_a_item_second_index) {
-            output_test_a_item.second[output_test_a_item_second_index] = reader.read_uint8();
+            let output_test_a_item_second_item;
+            output_test_a_item_second_item = reader.read_uint8();
+            output_test_a_item.second[output_test_a_item_second_index] = output_test_a_item_second_item;
         }
         output.test_a[output_test_a_index] = output_test_a_item;
     }
@@ -1136,21 +1007,27 @@ export function read(reader: Reader, output: Test) {
     let output_builtin_array_len = reader.read_uint32();
     output.builtin_array = new Array(output_builtin_array_len);
     for (let output_builtin_array_index = 0; output_builtin_array_index < output_builtin_array_len; ++output_builtin_array_index) {
-        output.builtin_array[output_builtin_array_index] = reader.read_uint8();
+        let output_builtin_array_item;
+        output_builtin_array_item = reader.read_uint8();
+        output.builtin_array[output_builtin_array_index] = output_builtin_array_item;
     }
     let output_string_scalar_len = reader.read_uint32();
     output.string_scalar = reader.read_string(output_string_scalar_len);
     let output_string_array_len = reader.read_uint32();
     output.string_array = new Array(output_string_array_len);
     for (let output_string_array_index = 0; output_string_array_index < output_string_array_len; ++output_string_array_index) {
+        let output_string_array_item;
         let output_string_array_item_len = reader.read_uint32();
-        output.string_array[output_string_array_index] = reader.read_string(output_string_array_item_len);
+        output_string_array_item = reader.read_string(output_string_array_item_len);
+        output.string_array[output_string_array_index] = output_string_array_item;
     }
     output.enum_scalar = Flag_try_from(reader.read_uint8());
     let output_enum_array_len = reader.read_uint32();
     output.enum_array = new Array(output_enum_array_len);
     for (let output_enum_array_index = 0; output_enum_array_index < output_enum_array_len; ++output_enum_array_index) {
-        output.enum_array[output_enum_array_index] = Flag_try_from(reader.read_uint8());
+        let output_enum_array_item;
+        output_enum_array_item = Flag_try_from(reader.read_uint8());
+        output.enum_array[output_enum_array_index] = output_enum_array_item;
     }
     output.struct_scalar.x = reader.read_float();
     output.struct_scalar.y = reader.read_float();
@@ -1169,10 +1046,91 @@ export function read(reader: Reader, output: Test) {
         output.opt_enum = Flag_try_from(reader.read_uint8());
     }
     if (reader.read_uint8() > 0) {
-        let output_opt_struct = {} as unknown as Position;
+        let output_opt_struct: any = {};
         output_opt_struct.x = reader.read_float();
         output_opt_struct.y = reader.read_float();
         output.opt_struct = output_opt_struct;
+    }
+}
+"
+        );
+    }
+
+    #[test]
+    fn nested_struct_with_opt_gen() {
+        use check::*;
+        let position = Struct {
+            fields: vec![
+                StructField {
+                    name: "x",
+                    r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
+                    array: false,
+                    optional: false,
+                },
+                StructField {
+                    name: "y",
+                    r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
+                    array: false,
+                    optional: false,
+                },
+            ],
+        };
+        let entity = Struct {
+            fields: vec![
+                StructField {
+                    name: "uid",
+                    r#type: Ptr::new(("uint32", ResolvedType::Builtin(Builtin::Uint32))),
+                    array: false,
+                    optional: false,
+                },
+                StructField {
+                    name: "pos",
+                    r#type: Ptr::new(("Position", ResolvedType::Struct(position.clone()))),
+                    array: false,
+                    optional: true,
+                },
+            ],
+        };
+        let state = Export {
+            name: "State",
+            r#struct: Struct {
+                fields: vec![
+                    StructField {
+                        name: "id",
+                        r#type: Ptr::new(("uint32", ResolvedType::Builtin(Builtin::Uint32))),
+                        array: false,
+                        optional: false,
+                    },
+                    StructField {
+                        name: "entities",
+                        r#type: Ptr::new(("Entity", ResolvedType::Struct(entity.clone()))),
+                        array: true,
+                        optional: false,
+                    },
+                ],
+            },
+        };
+        let mut gen = Generator::<TypeScript>::new();
+        gen.push_line();
+        gen.push_write_impl("State", &state);
+        let actual = gen.finish();
+        assert_eq!(
+            actual,
+            "
+export function write(writer: Writer, input: State) {
+    writer.write_uint32(input.id);
+    writer.write_uint32(input.entities.length);
+    for (let input_entities_item of input.entities) {
+        writer.write_uint32(input_entities_item.uid);
+        let input_entities_item_pos = input_entities_item.pos;
+        switch (input_entities_item_pos) {
+            case undefined: case null: writer.write_uint8(0); break;
+            default: {
+                writer.write_uint8(1);
+                writer.write_float(input_entities_item_pos.x);
+                writer.write_float(input_entities_item_pos.y);
+            }
+        }
     }
 }
 "
