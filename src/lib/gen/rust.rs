@@ -15,7 +15,7 @@ impl Common for Rust {
         let ctx = GenCtx::new(out);
         cat!(
             ctx,
-            "#![allow(dead_code, non_camel_case_types, unused_imports, clippy::field_reassign_with_default)]\n"
+            "#![allow(dead_code, non_camel_case_types, unused_imports, unused_assignments, clippy::field_reassign_with_default)]\n"
         );
         cat!(ctx, "use std::convert::TryFrom;\n");
     }
@@ -365,7 +365,7 @@ mod tests {
         assert_eq!(
             actual,
             "
-#![allow(dead_code, non_camel_case_types, unused_imports, clippy::field_reassign_with_default)]
+#![allow(dead_code, non_camel_case_types, unused_imports, unused_assignments, clippy::field_reassign_with_default)]
 use std::convert::TryFrom;
 "
         );
