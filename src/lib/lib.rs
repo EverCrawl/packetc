@@ -1,4 +1,4 @@
-#![allow(non_fmt_panic, clippy::upper_case_acronyms)]
+#![allow(clippy::upper_case_acronyms)]
 
 extern crate chrono;
 extern crate peg;

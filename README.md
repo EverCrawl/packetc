@@ -76,5 +76,3 @@ You can see real usage of the compiler in the [EverCrawl](https://github.com/Eve
 
 - Currently, reading data is really cumbersome, even though it doesn't have to be
   - accept only &[u8] into impl::read() and in impl::read() body, use Reader::new(data) and impl::Export::default(), instead of requiring the user pass those into impl::read(), because no allocations will happen anyway
-- De-duplicate the code in src/lib/gen 
-  - use macros to provide common operations, or use more "partial" generators which can be composed better

@@ -328,10 +328,10 @@ fn resolve_one_second_pass<'a>(
             );
         }
     } else {
-        panic!(format!(
+        panic!(
             "Something unresolved which is not a struct got into the second pass: {:#?}",
             ty
-        ));
+        );
     }
     Ok(())
 }
