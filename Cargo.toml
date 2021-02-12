@@ -23,3 +23,6 @@ path = "src/lib/lib.rs"
 [[bin]]
 name = "packetc"
 path = "src/main.rs"
+
+[profile.bench]
+debug = true
