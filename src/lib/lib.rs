@@ -45,7 +45,7 @@ where
     Lang: gen::Language + Default + gen::Common,
     check::Enum<'s>: gen::Definition<Lang>,
     check::Struct<'s>: gen::Definition<Lang>,
-    check::Export<'s>: gen::ReadImpl<Lang> + gen::WriteImpl<Lang>,
+    check::Export<'s>: gen::Impl<Lang>,
 {
     let ast = match parser::pkt::schema(schema) {
         Ok(ast) => ast,

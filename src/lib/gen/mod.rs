@@ -1,5 +1,5 @@
 pub mod gen_ctx;
-pub mod rust;
+/* pub mod rust; */
 pub mod ts;
 
 use std::fmt::Write;
@@ -16,13 +16,17 @@ where
     Lang: Language + Default + Common,
     check::Enum<'s>: Definition<Lang>,
     check::Struct<'s>: Definition<Lang>,
-    check::Export<'s>: ReadImpl<Lang> + WriteImpl<Lang>,
+    check::Export<'s>: Impl<Lang>,
 {
     let mut gen = Generator::<Lang>::new();
     gen.push_meta();
     gen.push_common();
     for (name, ty) in &from.types {
         let field_type = &*ty.borrow();
+        if name == &from.export.name {
+            // skip the export when creating definitions
+            continue;
+        }
         match &field_type.1 {
             // skip builtins, they are defined by push_common()
             check::ResolvedType::Builtin(_) => continue,
@@ -30,8 +34,7 @@ where
             check::ResolvedType::Struct(s) => gen.push_def(name, s),
         };
     }
-    gen.push_read_impl(from.export.name, &from.export);
-    gen.push_write_impl(from.export.name, &from.export);
+    gen.push_impl(from.export.name, &from.export);
     gen.finish()
 }
 
@@ -94,12 +97,8 @@ impl<L: Language + Default + Common> Generator<L> {
     }
 
     ///
-    pub fn push_write_impl(&mut self, name: &str, which: &impl WriteImpl<L>) {
-        which.gen_write_impl(&mut self.state, name, &mut self.buffer);
-    }
-
-    pub fn push_read_impl(&mut self, name: &str, which: &impl ReadImpl<L>) {
-        which.gen_read_impl(&mut self.state, name, &mut self.buffer);
+    pub fn push_impl(&mut self, name: &str, which: &impl Impl<L>) {
+        which.gen_impl(&mut self.state, name, &mut self.buffer);
     }
 
     pub fn finish(mut self) -> String { std::mem::take(&mut self.buffer) }
@@ -109,14 +108,10 @@ pub trait Common {
     fn gen_common(&self, out: &mut String);
 }
 
-pub trait WriteImpl<K: Language> {
-    fn gen_write_impl(&self, state: &mut K, name: &str, out: &mut String);
+pub trait Impl<L: Language> {
+    fn gen_impl(&self, state: &mut L, name: &str, out: &mut String);
 }
 
-pub trait ReadImpl<K: Language> {
-    fn gen_read_impl(&self, state: &mut K, name: &str, out: &mut String);
-}
-
-pub trait Definition<K: Language> {
-    fn gen_def(&self, state: &mut K, name: &str, out: &mut String);
+pub trait Definition<L: Language> {
+    fn gen_def(&self, state: &mut L, name: &str, out: &mut String);
 }

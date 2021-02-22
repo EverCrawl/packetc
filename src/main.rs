@@ -19,7 +19,7 @@ struct Opts {
 
 #[derive(Clone, Copy, Debug)]
 enum Lang {
-    Rust,
+    /* Rust, */
     TypeScript,
 }
 impl std::str::FromStr for Lang {
@@ -27,7 +27,7 @@ impl std::str::FromStr for Lang {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "rust" => Ok(Lang::Rust),
+            /* "rust" => Ok(Lang::Rust), */
             "ts" => Ok(Lang::TypeScript),
             s => {
                 println!("{}", s);
@@ -39,7 +39,7 @@ impl std::str::FromStr for Lang {
 
 fn extension(lang: Lang) -> &'static str {
     match lang {
-        Lang::Rust => "rs",
+        /* Lang::Rust => "rs", */
         Lang::TypeScript => "ts",
     }
 }
@@ -69,7 +69,7 @@ fn run_one(path: String, lang: Lang) -> Result<Schema> {
     Ok(Schema {
         path: PathBuf::from(path.clone()),
         generated: match lang {
-            Lang::Rust => pkt::compile::<pkt::gen::rust::Rust>(&fs::read_to_string(path)?)?,
+            /* Lang::Rust => pkt::compile::<pkt::gen::rust::Rust>(&fs::read_to_string(path)?)?, */
             Lang::TypeScript => pkt::compile::<pkt::gen::ts::TypeScript>(&fs::read_to_string(path)?)?,
             //_ => return println!("not implemented"),
         },

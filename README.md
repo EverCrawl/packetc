@@ -71,8 +71,39 @@ fn main() {
 
 You can see real usage of the compiler in the [EverCrawl](https://github.com/EverCrawl) project.
 
+### TODOs
 
-### TODO
-
-- Currently, reading data is really cumbersome, even though it doesn't have to be
-  - accept only &[u8] into impl::read() and in impl::read() body, use Reader::new(data) and impl::Export::default(), instead of requiring the user pass those into impl::read(), because no allocations will happen anyway
+- TODO: packet-ts 
+- TODO: allow specifying max array size
+  - use it to shrink array len encoding
+- TODO: discriminated unions
+  - syntax: `Name: union { Type0 = Discriminant0, ... }`
+    - Discriminant is optional
+  - TS emit:
+    - `type Name = [0, T0] | [1, T1] | ... | [N, TN]`
+  - limits:
+    - discriminant -> u8
+  - implementation:
+    - write:
+      - write discriminant
+      - write value
+    - read:
+      - read discriminant into var
+      - switch (discriminant)
+        - case N => read value of union type #N -> store
+- TODO: tuples
+  - syntax: `Name: (Type, ...)`
+    - tuples don't emit any declaration
+  - implementation:
+    - write:
+      - write value 0
+      - write value 1
+      - ...
+      - write value N
+    - read:
+      - read value 0 into temp 0
+      - read value 1 into temp 1
+      - ...
+      - read value N into temp N
+      - store [temp 0, temp 1, ..., temp N]
+- TODO: anonymous structs and unions

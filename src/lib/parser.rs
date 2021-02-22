@@ -2,33 +2,6 @@ use ast::*;
 
 use super::ast;
 
-// TODO: allow specifying max array size -> use it to shrink array len encoding
-// TODO: discriminated unions
-// should be prefixed with discriminant, followed by contents
-// syntax:
-/*
-Name: union {
-    TypeA,
-    TypeB,
-    TypeC
-}
-*/
-// TODO: anonymous structs and unions
-// syntax:
-/*
-Name: struct {
-    field: struct {
-        field: struct {
-            field: struct {
-                # up to some arbitrary
-                # max nesting depth
-            }
-        }
-    }
-}
-*/
-// if possible right now, it's uint32 by default, which is very wasteful
-
 peg::parser!(pub grammar pkt() for str {
     /// Parses whitespace
     rule _() = [' ' | '\t']*
