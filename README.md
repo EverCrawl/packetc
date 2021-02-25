@@ -73,9 +73,12 @@ You can see real usage of the compiler in the [EverCrawl](https://github.com/Eve
 
 ### TODOs
 
-- TODO: packet-ts 
-- TODO: allow specifying max array size
-  - use it to shrink array len encoding
+- TODO: sized vs unsized packets
+  - allow specifying max array/string size
+    - +use it to shrink array len encoding
+    - arrays/strings with a max length are sized
+  - packets with no unsized members are sized
+  - packets which are sized also output their size
 - TODO: discriminated unions
   - syntax: `Name: union { Type0 = Discriminant0, ... }`
     - Discriminant is optional

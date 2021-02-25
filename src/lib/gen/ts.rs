@@ -260,11 +260,12 @@ impl<'a> Impl<TypeScript> for check::Export<'a> {
         cat!(ctx, ") {{}}\n");
 
         ctx.push_fname("output");
-        cat!(ctx, "static read(data: ArrayBuffer): {name} {{\n");
+        cat!(ctx, "static read(data: ArrayBuffer): {name} | null {{\n");
         cat!(ctx +++);
         cat!(ctx, "let reader = new Reader(data);\n");
         cat!(ctx, "let output = Object.create({name});\n");
         gen_read_impl_struct(&mut ctx, &self.r#struct, &name);
+        cat!(ctx, "if (reader.failed) return null;\n");
         cat!(ctx, "return output;\n");
         cat!(ctx ---);
         cat!(ctx, "}}\n");
@@ -596,7 +597,7 @@ export class Test {
         public b: number[] | undefined,
         public c: number,
     ) {}
-    static read(data: ArrayBuffer): Test {
+    static read(data: ArrayBuffer): Test | null {
         let reader = new Reader(data);
         let output = Object.create(Test);
         if (reader.read_uint8() > 0) {
@@ -616,6 +617,7 @@ export class Test {
             output.b = undefined;
         }
         output.c = reader.read_uint8();
+        if (reader.failed) return null;
         return output;
     }
     write(buffer?: ArrayBuffer): ArrayBuffer {
@@ -689,7 +691,7 @@ export class TestB {
     constructor(
         public test_a: TestA[],
     ) {}
-    static read(data: ArrayBuffer): TestB {
+    static read(data: ArrayBuffer): TestB | null {
         let reader = new Reader(data);
         let output = Object.create(TestB);
         let output_test_a_len = reader.read_uint32();
@@ -712,6 +714,7 @@ export class TestB {
             }
             output.test_a[output_test_a_index] = output_test_a_item;
         }
+        if (reader.failed) return null;
         return output;
     }
     write(buffer?: ArrayBuffer): ArrayBuffer {
@@ -854,7 +857,7 @@ export class Test {
         public opt_enum: Flag | undefined,
         public opt_struct: Position | undefined,
     ) {}
-    static read(data: ArrayBuffer): Test {
+    static read(data: ArrayBuffer): Test | null {
         let reader = new Reader(data);
         let output = Object.create(Test);
         output.builtin_scalar = reader.read_uint8();
@@ -911,6 +914,7 @@ export class Test {
         } else {
             output.opt_struct = undefined;
         }
+        if (reader.failed) return null;
         return output;
     }
     write(buffer?: ArrayBuffer): ArrayBuffer {
@@ -1041,7 +1045,7 @@ export class State {
         public id: number,
         public entities: Entity[],
     ) {}
-    static read(data: ArrayBuffer): State {
+    static read(data: ArrayBuffer): State | null {
         let reader = new Reader(data);
         let output = Object.create(State);
         output.id = reader.read_uint32();
@@ -1060,6 +1064,7 @@ export class State {
             }
             output.entities[output_entities_index] = output_entities_item;
         }
+        if (reader.failed) return null;
         return output;
     }
     write(buffer?: ArrayBuffer): ArrayBuffer {
