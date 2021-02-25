@@ -192,14 +192,21 @@ fn gen_read_impl_builtin(ctx: &mut GenCtx, type_info: &check::Builtin, type_name
     }
 }
 
-fn gen_read_impl_enum(ctx: &mut GenCtx, type_info: &check::Enum, type_name: &str) {
+fn gen_read_impl_enum(ctx: &mut GenCtx, type_info: &check::Enum, _name: &str) {
     let repr_name = match type_info.repr {
         check::EnumRepr::U8 => "uint8",
         check::EnumRepr::U16 => "uint16",
         check::EnumRepr::U32 => "uint32",
     };
+    let (min, max) = (
+        1 << type_info.variants[0].value,
+        1 << type_info.variants[type_info.variants.len() - 1].value,
+    );
     let fname = self::fname(&ctx.stack);
-    cat!(ctx, "{fname} = {type_name}_try_from(reader.read_{repr_name}());\n");
+    let temp = self::varname(&ctx.stack, "temp");
+    cat!(ctx, "let {temp} = reader.read_{repr_name}();\n");
+    cat!(ctx, "if ({min} <= {temp} && {temp} <= {max}) {fname} = {temp};\n");
+    cat!(ctx, "else reader.failed = true;\n");
 }
 
 fn gen_read_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
@@ -230,41 +237,44 @@ fn gen_read_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
     }
 }
 
-fn field_ctor_type(ty: &(&str, check::ResolvedType), array: bool, optional: bool) -> String {
+fn field_ctor_type(ty: &(&str, check::ResolvedType), export: &str, array: bool, optional: bool) -> String {
     let (mut name, rty) = ty;
+    let mut needs_export_prefix = false;
     match *rty {
         check::ResolvedType::Builtin(check::Builtin::String) => name = "string",
         check::ResolvedType::Builtin(_) => name = "number",
-        _ => (),
+        _ => needs_export_prefix = true,
     }
     format_f!(
-        "{name}{arr}{opt}",
+        "{prefix}{dot}{name}{arr}{opt}",
+        prefix = if needs_export_prefix { export } else { "" },
+        dot = if needs_export_prefix { "." } else { "" },
         arr = if array { "[]" } else { "" },
         opt = if optional { " | undefined" } else { "" }
     )
 }
 
-impl<'a> Impl<TypeScript> for check::Export<'a> {
-    fn gen_impl(&self, _: &mut TypeScript, name: &str, out: &mut String) {
+impl Impl for TypeScript {
+    fn gen_impl<'a>(&self, export: &check::Export, out: &mut String) {
         let mut ctx = GenCtx::new(out);
 
-        cat!(ctx, "export class {name} {{\n");
+        cat!(ctx, "export class {export.name} {{\n");
         cat!(ctx +++);
         cat!(ctx, "constructor(\n");
         cat!(ctx +++);
-        for field in self.r#struct.fields.iter() {
-            let field_type = field_ctor_type(&(*field.r#type.borrow()), field.array, field.optional);
+        for field in export.r#struct.fields.iter() {
+            let field_type = field_ctor_type(&(*field.r#type.borrow()), export.name, field.array, field.optional);
             cat!(ctx, "public {field.name}: {field_type},\n");
         }
         cat!(ctx ---);
         cat!(ctx, ") {{}}\n");
 
         ctx.push_fname("output");
-        cat!(ctx, "static read(data: ArrayBuffer): {name} | null {{\n");
+        cat!(ctx, "static read(data: ArrayBuffer): {export.name} | null {{\n");
         cat!(ctx +++);
         cat!(ctx, "let reader = new Reader(data);\n");
-        cat!(ctx, "let output = Object.create({name});\n");
-        gen_read_impl_struct(&mut ctx, &self.r#struct, &name);
+        cat!(ctx, "let output = Object.create({export.name});\n");
+        gen_read_impl_struct(&mut ctx, &export.r#struct, &export.name);
         cat!(ctx, "if (reader.failed) return null;\n");
         cat!(ctx, "return output;\n");
         cat!(ctx ---);
@@ -275,7 +285,7 @@ impl<'a> Impl<TypeScript> for check::Export<'a> {
         cat!(ctx, "write(buffer?: ArrayBuffer): ArrayBuffer {{\n");
         cat!(ctx +++);
         cat!(ctx, "let writer = buffer ? new Writer(buffer) : new Writer();\n");
-        gen_write_impl_struct(&mut ctx, &self.r#struct, &name);
+        gen_write_impl_struct(&mut ctx, &export.r#struct, &export.name);
         cat!(ctx, "return writer.finish();\n");
         cat!(ctx ---);
         cat!(ctx, "}}\n");
@@ -286,61 +296,56 @@ impl<'a> Impl<TypeScript> for check::Export<'a> {
     }
 }
 
-impl<'a> Definition<TypeScript> for check::Struct<'a> {
-    fn gen_def(&self, _: &mut TypeScript, name: &str, out: &mut String) {
-        let mut ctx = GenCtx::new(out);
-
-        cat!(ctx, "export interface {name} {{\n");
-        cat!(ctx +++);
-        for field in self.fields.iter() {
-            let type_info = &*field.r#type.borrow();
-            let typename: &str = match &type_info.1 {
-                check::ResolvedType::Builtin(b) => match b {
-                    check::Builtin::String => "string",
-                    _ => "number",
-                },
-                _ => &type_info.0,
-            };
-            let opt = if field.optional { "?" } else { "" };
-            let arr = if field.array { "[]" } else { "" };
-
-            cat!(ctx, "{field.name}{opt}: {typename}{arr},\n");
-        }
-        cat!(ctx ---);
-        cat!(ctx, "}}\n");
-    }
-}
-
-fn gen_def_enum_tryfrom_impl<'a>(ctx: &mut GenCtx, ty: &check::Enum<'a>, name: &str) {
-    let (min, max) = (&ty.variants[0], &ty.variants[ty.variants.len() - 1]);
-
-    cat!(ctx, "function {name}_try_from(value: number): {name} {{\n");
+fn gen_struct_decl(ctx: &mut GenCtx, ty: &check::Struct, name: &str) {
+    cat!(ctx, "export interface {name} {{\n");
     cat!(ctx +++);
-    cat!(
-        ctx,
-        "if ({name}.{min.name} <= value && value <= {name}.{max.name}) {{ return value; }}\n"
-    );
-    cat!(
-        ctx,
-        "else throw new Error(`'${{value}}' is not a valid '{name}' value`);\n"
-    );
+    for field in ty.fields.iter() {
+        let type_info = &*field.r#type.borrow();
+        let typename: &str = match &type_info.1 {
+            check::ResolvedType::Builtin(b) => match b {
+                check::Builtin::String => "string",
+                _ => "number",
+            },
+            _ => &type_info.0,
+        };
+        let opt = if field.optional { "?" } else { "" };
+        let arr = if field.array { "[]" } else { "" };
+
+        cat!(ctx, "{field.name}{opt}: {typename}{arr},\n");
+    }
     cat!(ctx ---);
     cat!(ctx, "}}\n");
 }
 
-impl<'a> Definition<TypeScript> for check::Enum<'a> {
-    fn gen_def(&self, _: &mut TypeScript, name: &str, out: &mut String) {
+fn gen_enum_decl(ctx: &mut GenCtx, ty: &check::Enum, name: &str) {
+    cat!(ctx, "export const enum {name} {{\n");
+    cat!(ctx +++);
+    for variant in ty.variants.iter() {
+        cat!(ctx, "{variant.name} = 1 << {variant.value},\n");
+    }
+    cat!(ctx ---);
+    cat!(ctx, "}}\n");
+}
+
+impl Declaration for TypeScript {
+    fn gen_decls<'a>(&self, types: &check::TypeMap<'a>, export: &str, out: &mut String) {
         let mut ctx = GenCtx::new(out);
 
-        cat!(ctx, "export const enum {name} {{\n");
+        cat!(ctx, "export namespace {export} {{\n");
         cat!(ctx +++);
-        for variant in self.variants.iter() {
-            cat!(ctx, "{variant.name} = 1 << {variant.value},\n");
+        for (name, ty) in types.iter() {
+            if *name == export {
+                continue;
+            }
+
+            match &(*ty.borrow()).1 {
+                check::ResolvedType::Builtin(_) => (),
+                check::ResolvedType::Enum(ty) => gen_enum_decl(&mut ctx, ty, name),
+                check::ResolvedType::Struct(ty) => gen_struct_decl(&mut ctx, ty, name),
+            }
         }
         cat!(ctx ---);
         cat!(ctx, "}}\n");
-
-        gen_def_enum_tryfrom_impl(&mut ctx, &self, name);
     }
 }
 
@@ -367,32 +372,41 @@ import { Reader, Writer } from \"packet\";
     #[test]
     fn simple_struct_gen() {
         use check::*;
-        let position = Struct {
-            fields: vec![
-                StructField {
-                    name: "x",
-                    r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
-                    array: false,
-                    optional: false,
-                },
-                StructField {
-                    name: "y",
-                    r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
-                    array: false,
-                    optional: false,
-                },
-            ],
-        };
+        let mut types = TypeMap::new();
+        types.insert(
+            "Position",
+            Ptr::new((
+                "Position",
+                ResolvedType::Struct(Struct {
+                    fields: vec![
+                        StructField {
+                            name: "x",
+                            r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
+                            array: false,
+                            optional: false,
+                        },
+                        StructField {
+                            name: "y",
+                            r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
+                            array: false,
+                            optional: false,
+                        },
+                    ],
+                }),
+            )),
+        );
         let mut gen = Generator::<TypeScript>::new();
         gen.push_line();
-        gen.push_def("Position", &position);
+        gen.push_decls(&types, "Test");
         let actual = gen.finish();
         assert_eq!(
             actual,
             "
-export interface Position {
-    x: number,
-    y: number,
+export namespace Test {
+    export interface Position {
+        x: number,
+        y: number,
+    }
 }
 "
         );
@@ -401,39 +415,48 @@ export interface Position {
     #[test]
     fn struct_with_optional_gen() {
         use check::*;
-        let test = Struct {
-            fields: vec![
-                StructField {
-                    name: "a",
-                    r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
-                    array: false,
-                    optional: true,
-                },
-                StructField {
-                    name: "b",
-                    r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
-                    array: true,
-                    optional: true,
-                },
-                StructField {
-                    name: "c",
-                    r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
-                    array: false,
-                    optional: false,
-                },
-            ],
-        };
+        let mut types = TypeMap::new();
+        types.insert(
+            "A",
+            Ptr::new((
+                "A",
+                ResolvedType::Struct(Struct {
+                    fields: vec![
+                        StructField {
+                            name: "a",
+                            r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
+                            array: false,
+                            optional: true,
+                        },
+                        StructField {
+                            name: "b",
+                            r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
+                            array: true,
+                            optional: true,
+                        },
+                        StructField {
+                            name: "c",
+                            r#type: Ptr::new(("float", ResolvedType::Builtin(Builtin::Float))),
+                            array: false,
+                            optional: false,
+                        },
+                    ],
+                }),
+            )),
+        );
         let mut gen = Generator::<TypeScript>::new();
         gen.push_line();
-        gen.push_def("Test", &test);
+        gen.push_decls(&types, "Test");
         let actual = gen.finish();
         assert_eq!(
             actual,
             "
-export interface Test {
-    a?: number,
-    b?: number[],
-    c: number,
+export namespace Test {
+    export interface A {
+        a?: number,
+        b?: number[],
+        c: number,
+    }
 }
 "
         );
@@ -442,24 +465,29 @@ export interface Test {
     #[test]
     fn enum_gen() {
         use check::*;
-        let flag = Enum {
-            repr: EnumRepr::U8,
-            variants: vec![EnumVariant { name: "A", value: 0 }, EnumVariant { name: "B", value: 1 }],
-        };
+        let mut types = TypeMap::new();
+        types.insert(
+            "Flag",
+            Ptr::new((
+                "Flag",
+                ResolvedType::Enum(Enum {
+                    repr: EnumRepr::U8,
+                    variants: vec![EnumVariant { name: "A", value: 0 }, EnumVariant { name: "B", value: 1 }],
+                }),
+            )),
+        );
         let mut gen = Generator::<TypeScript>::new();
         gen.push_line();
-        gen.push_def("Flag", &flag);
+        gen.push_decls(&types, "Test");
         let actual = gen.finish();
         assert_eq!(
             actual,
             "
-export const enum Flag {
-    A = 1 << 0,
-    B = 1 << 1,
-}
-function Flag_try_from(value: number): Flag {
-    if (Flag.A <= value && value <= Flag.B) { return value; }
-    else throw new Error(`'${value}' is not a valid 'Flag' value`);
+export namespace Test {
+    export const enum Flag {
+        A = 1 << 0,
+        B = 1 << 1,
+    }
 }
 "
         );
@@ -468,89 +496,95 @@ function Flag_try_from(value: number): Flag {
     #[test]
     fn complex_struct_gen() {
         use check::*;
-        let test = Export {
-            name: "Test",
-            r#struct: Struct {
-                fields: vec![
-                    StructField {
-                        name: "builtin_scalar",
-                        r#type: Ptr::new(("uint8", ResolvedType::Builtin(Builtin::Uint8))),
-                        array: false,
-                        optional: false,
-                    },
-                    StructField {
-                        name: "builtin_array",
-                        r#type: Ptr::new(("uint8", ResolvedType::Builtin(Builtin::Uint8))),
-                        array: true,
-                        optional: false,
-                    },
-                    StructField {
-                        name: "string_scalar",
-                        r#type: Ptr::new(("string", ResolvedType::Builtin(Builtin::String))),
-                        array: false,
-                        optional: false,
-                    },
-                    StructField {
-                        name: "string_array",
-                        r#type: Ptr::new(("string", ResolvedType::Builtin(Builtin::String))),
-                        array: true,
-                        optional: false,
-                    },
-                    StructField {
-                        name: "enum_scalar",
-                        r#type: Ptr::new((
-                            "Flag",
-                            ResolvedType::Enum(Enum {
-                                repr: EnumRepr::U8,
-                                variants: vec![],
-                            }),
-                        )),
-                        array: false,
-                        optional: false,
-                    },
-                    StructField {
-                        name: "enum_array",
-                        r#type: Ptr::new((
-                            "Flag",
-                            ResolvedType::Enum(Enum {
-                                repr: EnumRepr::U8,
-                                variants: vec![],
-                            }),
-                        )),
-                        array: true,
-                        optional: false,
-                    },
-                    StructField {
-                        name: "struct_scalar",
-                        r#type: Ptr::new(("Position", ResolvedType::Struct(Struct { fields: vec![] }))),
-                        array: false,
-                        optional: false,
-                    },
-                    StructField {
-                        name: "struct_array",
-                        r#type: Ptr::new(("Position", ResolvedType::Struct(Struct { fields: vec![] }))),
-                        array: true,
-                        optional: false,
-                    },
-                ],
-            },
-        };
+        let mut types = TypeMap::new();
+        types.insert(
+            "A",
+            Ptr::new((
+                "A",
+                ResolvedType::Struct(Struct {
+                    fields: vec![
+                        StructField {
+                            name: "builtin_scalar",
+                            r#type: Ptr::new(("uint8", ResolvedType::Builtin(Builtin::Uint8))),
+                            array: false,
+                            optional: false,
+                        },
+                        StructField {
+                            name: "builtin_array",
+                            r#type: Ptr::new(("uint8", ResolvedType::Builtin(Builtin::Uint8))),
+                            array: true,
+                            optional: false,
+                        },
+                        StructField {
+                            name: "string_scalar",
+                            r#type: Ptr::new(("string", ResolvedType::Builtin(Builtin::String))),
+                            array: false,
+                            optional: false,
+                        },
+                        StructField {
+                            name: "string_array",
+                            r#type: Ptr::new(("string", ResolvedType::Builtin(Builtin::String))),
+                            array: true,
+                            optional: false,
+                        },
+                        StructField {
+                            name: "enum_scalar",
+                            r#type: Ptr::new((
+                                "Flag",
+                                ResolvedType::Enum(Enum {
+                                    repr: EnumRepr::U8,
+                                    variants: vec![],
+                                }),
+                            )),
+                            array: false,
+                            optional: false,
+                        },
+                        StructField {
+                            name: "enum_array",
+                            r#type: Ptr::new((
+                                "Flag",
+                                ResolvedType::Enum(Enum {
+                                    repr: EnumRepr::U8,
+                                    variants: vec![],
+                                }),
+                            )),
+                            array: true,
+                            optional: false,
+                        },
+                        StructField {
+                            name: "struct_scalar",
+                            r#type: Ptr::new(("Position", ResolvedType::Struct(Struct { fields: vec![] }))),
+                            array: false,
+                            optional: false,
+                        },
+                        StructField {
+                            name: "struct_array",
+                            r#type: Ptr::new(("Position", ResolvedType::Struct(Struct { fields: vec![] }))),
+                            array: true,
+                            optional: false,
+                        },
+                    ],
+                }),
+            )),
+        );
         let mut gen = Generator::<TypeScript>::new();
         gen.push_line();
-        gen.push_def("Test", &test.r#struct);
+        gen.push_decls(&types, "Test");
         let actual = gen.finish();
         assert_eq!(
             actual,
             "
-export interface Test {
-    builtin_scalar: number,
-    builtin_array: number[],
-    string_scalar: string,
-    string_array: string[],
-    enum_scalar: Flag,
-    enum_array: Flag[],
-    struct_scalar: Position,
-    struct_array: Position[],
+export namespace Test {
+    export interface A {
+        builtin_scalar: number,
+        builtin_array: number[],
+        string_scalar: string,
+        string_array: string[],
+        enum_scalar: Flag,
+        enum_array: Flag[],
+        struct_scalar: Position,
+        struct_array: Position[],
+    }
 }
 "
         );
@@ -586,7 +620,7 @@ export interface Test {
         };
         let mut gen = Generator::<TypeScript>::new();
         gen.push_line();
-        gen.push_impl("Test", &test);
+        gen.push_impl(&test);
         let actual = gen.finish();
         assert_eq!(
             actual,
@@ -682,14 +716,14 @@ export class Test {
         };
         let mut gen = Generator::<TypeScript>::new();
         gen.push_line();
-        gen.push_impl("TestB", &test_b);
+        gen.push_impl(&test_b);
         let actual = gen.finish();
         assert_eq!(
             actual,
             "
 export class TestB {
     constructor(
-        public test_a: TestA[],
+        public test_a: TestB.TestA[],
     ) {}
     static read(data: ArrayBuffer): TestB | null {
         let reader = new Reader(data);
@@ -838,7 +872,7 @@ export class TestB {
         };
         let mut gen = Generator::<TypeScript>::new();
         gen.push_line();
-        gen.push_impl("Test", &test);
+        gen.push_impl(&test);
         let actual = gen.finish();
         assert_eq!(
             actual,
@@ -849,13 +883,13 @@ export class Test {
         public builtin_array: number[],
         public string_scalar: string,
         public string_array: string[],
-        public enum_scalar: Flag,
-        public enum_array: Flag[],
-        public struct_scalar: Position,
-        public struct_array: Position[],
+        public enum_scalar: Test.Flag,
+        public enum_array: Test.Flag[],
+        public struct_scalar: Test.Position,
+        public struct_array: Test.Position[],
         public opt_scalar: number | undefined,
-        public opt_enum: Flag | undefined,
-        public opt_struct: Position | undefined,
+        public opt_enum: Test.Flag | undefined,
+        public opt_struct: Test.Position | undefined,
     ) {}
     static read(data: ArrayBuffer): Test | null {
         let reader = new Reader(data);
@@ -878,12 +912,16 @@ export class Test {
             output_string_array_item = reader.read_string(output_string_array_item_len);
             output.string_array[output_string_array_index] = output_string_array_item;
         }
-        output.enum_scalar = Flag_try_from(reader.read_uint8());
+        let output_enum_scalar_temp = reader.read_uint8();
+        if (1 <= output_enum_scalar_temp && output_enum_scalar_temp <= 2) output.enum_scalar = output_enum_scalar_temp;
+        else reader.failed = true;
         let output_enum_array_len = reader.read_uint32();
         output.enum_array = new Array(output_enum_array_len);
         for (let output_enum_array_index = 0; output_enum_array_index < output_enum_array_len; ++output_enum_array_index) {
             let output_enum_array_item;
-            output_enum_array_item = Flag_try_from(reader.read_uint8());
+            let output_enum_array_item_temp = reader.read_uint8();
+            if (1 <= output_enum_array_item_temp && output_enum_array_item_temp <= 2) output_enum_array_item = output_enum_array_item_temp;
+            else reader.failed = true;
             output.enum_array[output_enum_array_index] = output_enum_array_item;
         }
         output.struct_scalar.x = reader.read_float();
@@ -902,7 +940,9 @@ export class Test {
             output.opt_scalar = undefined;
         }
         if (reader.read_uint8() > 0) {
-            output.opt_enum = Flag_try_from(reader.read_uint8());
+            let output_opt_enum_temp = reader.read_uint8();
+            if (1 <= output_opt_enum_temp && output_opt_enum_temp <= 2) output.opt_enum = output_opt_enum_temp;
+            else reader.failed = true;
         } else {
             output.opt_enum = undefined;
         }
@@ -1035,7 +1075,7 @@ export class Test {
         };
         let mut gen = Generator::<TypeScript>::new();
         gen.push_line();
-        gen.push_impl("State", &state);
+        gen.push_impl(&state);
         let actual = gen.finish();
         assert_eq!(
             actual,
@@ -1043,7 +1083,7 @@ export class Test {
 export class State {
     constructor(
         public id: number,
-        public entities: Entity[],
+        public entities: Test.Entity[],
     ) {}
     static read(data: ArrayBuffer): State | null {
         let reader = new Reader(data);

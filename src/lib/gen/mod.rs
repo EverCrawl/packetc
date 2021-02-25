@@ -11,30 +11,15 @@ use super::*;
 
 const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
 
-pub fn generate<'s, Lang>(from: &check::Resolved<'s>) -> String
+pub fn generate<Lang>(from: &check::Resolved) -> String
 where
-    Lang: Language + Default + Common,
-    check::Enum<'s>: Definition<Lang>,
-    check::Struct<'s>: Definition<Lang>,
-    check::Export<'s>: Impl<Lang>,
+    Lang: Language + Default + Common + Declaration + Impl,
 {
     let mut gen = Generator::<Lang>::new();
     gen.push_meta();
     gen.push_common();
-    for (name, ty) in &from.types {
-        let field_type = &*ty.borrow();
-        if name == &from.export.name {
-            // skip the export when creating definitions
-            continue;
-        }
-        match &field_type.1 {
-            // skip builtins, they are defined by push_common()
-            check::ResolvedType::Builtin(_) => continue,
-            check::ResolvedType::Enum(e) => gen.push_def(name, e),
-            check::ResolvedType::Struct(s) => gen.push_def(name, s),
-        };
-    }
-    gen.push_impl(from.export.name, &from.export);
+    gen.push_decls(&from.types, from.export.name);
+    gen.push_impl(&from.export);
     gen.finish()
 }
 
@@ -64,7 +49,7 @@ pub struct Generator<L: Language + Default + Common> {
     buffer: String,
 }
 
-impl<L: Language + Default + Common> Generator<L> {
+impl<L: Language + Default + Common + Declaration + Impl> Generator<L> {
     pub fn new() -> Self {
         Generator {
             state: L::default(),
@@ -86,21 +71,11 @@ impl<L: Language + Default + Common> Generator<L> {
             chrono::Utc::now().to_rfc2822()
         );
     }
-
-    /// Anything that is present in all files of a given language
     pub fn push_common(&mut self) { self.state.gen_common(&mut self.buffer); }
-
-    /// A definition is a struct, interface, etc - anything that defines
-    /// the layout of data for a given language
-    pub fn push_def(&mut self, name: &str, which: &impl Definition<L>) {
-        which.gen_def(&mut self.state, name, &mut self.buffer);
+    pub fn push_decls<'a>(&mut self, types: &check::TypeMap<'a>, export: &str) {
+        self.state.gen_decls(types, export, &mut self.buffer);
     }
-
-    ///
-    pub fn push_impl(&mut self, name: &str, which: &impl Impl<L>) {
-        which.gen_impl(&mut self.state, name, &mut self.buffer);
-    }
-
+    pub fn push_impl(&mut self, export: &check::Export) { self.state.gen_impl(export, &mut self.buffer); }
     pub fn finish(mut self) -> String { std::mem::take(&mut self.buffer) }
 }
 
@@ -108,10 +83,10 @@ pub trait Common {
     fn gen_common(&self, out: &mut String);
 }
 
-pub trait Impl<L: Language> {
-    fn gen_impl(&self, state: &mut L, name: &str, out: &mut String);
+pub trait Impl {
+    fn gen_impl(&self, export: &check::Export, out: &mut String);
 }
 
-pub trait Definition<L: Language> {
-    fn gen_def(&self, state: &mut L, name: &str, out: &mut String);
+pub trait Declaration {
+    fn gen_decls<'a>(&self, types: &check::TypeMap<'a>, export: &str, out: &mut String);
 }

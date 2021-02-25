@@ -389,10 +389,12 @@ fn resolve_export<'a>(
     }
 }
 
+pub type TypeMap<'a> = HashMap<&'a str, Ptr<(&'a str, ResolvedType<'a>)>>;
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct Resolved<'a> {
     pub export: Export<'a>,
-    pub types: HashMap<&'a str, Ptr<(&'a str, ResolvedType<'a>)>>,
+    pub types: TypeMap<'a>,
 }
 
 pub fn type_check(ast: ast::AST<'_>) -> Result<Resolved<'_>, String> {
