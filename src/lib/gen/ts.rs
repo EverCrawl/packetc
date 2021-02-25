@@ -1083,7 +1083,7 @@ export class Test {
 export class State {
     constructor(
         public id: number,
-        public entities: Test.Entity[],
+        public entities: State.Entity[],
     ) {}
     static read(data: ArrayBuffer): State | null {
         let reader = new Reader(data);
