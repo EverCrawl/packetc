@@ -113,43 +113,21 @@ fn gen_write_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
     }
 }
 
-fn gen_read_impl_optional(ctx: &mut GenCtx, init_item: bool, body: impl Fn(&mut GenCtx)) {
+fn gen_read_impl_optional(ctx: &mut GenCtx, body: impl Fn(&mut GenCtx)) {
     let fname = self::fname(&ctx.stack);
-    let bind_var = bindname(&ctx.stack);
-    let old_stack = if init_item {
-        let mut old_stack = Vec::new();
-        ctx.swap_stack(&mut old_stack);
-        ctx.push_fname(bind_var.clone());
-
-        Some(old_stack)
-    } else {
-        None
-    };
 
     cat!(ctx, "if (reader.read_uint8() > 0) {{\n");
     cat!(ctx +++);
-    if init_item {
-        cat!(ctx, "let {bind_var}: any = {{}};\n")
-    }
-
     body(ctx);
-
-    if init_item {
-        cat!(ctx, "{fname} = {bind_var};\n");
-    }
     cat!(ctx ---);
     cat!(ctx, "}} else {{\n");
     cat!(ctx +++);
     cat!(ctx, "{fname} = undefined;\n");
     cat!(ctx ---);
     cat!(ctx, "}}\n");
-
-    if let Some(mut old_stack) = old_stack {
-        ctx.swap_stack(&mut old_stack);
-    }
 }
 
-fn gen_read_impl_array(ctx: &mut GenCtx, init_item: bool, body: impl Fn(&mut GenCtx)) {
+fn gen_read_impl_array(ctx: &mut GenCtx, init_struct: bool, body: impl Fn(&mut GenCtx)) {
     let len_var = varname(&ctx.stack, "len");
     let fname = self::fname(&ctx.stack);
     let idx_var = varname(&ctx.stack, "index");
@@ -162,14 +140,12 @@ fn gen_read_impl_array(ctx: &mut GenCtx, init_item: bool, body: impl Fn(&mut Gen
     cat!(ctx, "{fname} = new Array({len_var});\n");
     cat!(ctx, "for (let {idx_var} = 0; {idx_var} < {len_var}; ++{idx_var}) {{\n");
     cat!(ctx +++);
-    if init_item {
-        cat!(ctx, "let {item_var}: any = {{}};\n");
-    } else {
-        cat!(ctx, "let {item_var};\n");
-    }
-
+    cat!(
+        ctx,
+        "let {item_var}: any = {};\n",
+        if init_struct { "{}" } else { "undefined" }
+    );
     body(ctx);
-
     cat!(ctx, "{fname}[{idx_var}] = {item_var};\n");
     cat!(ctx ---);
     cat!(ctx, "}}\n");
@@ -209,31 +185,51 @@ fn gen_read_impl_enum(ctx: &mut GenCtx, type_info: &check::Enum, _name: &str) {
     cat!(ctx, "else reader.failed = true;\n");
 }
 
-fn gen_read_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str) {
+fn gen_read_impl_struct(ctx: &mut GenCtx, ty: &check::Struct, _name: &str, init: bool) {
+    let fname = self::fname(&ctx.stack);
+    let bind_var = bindname(&ctx.stack);
+    let old_stack = if init {
+        let mut old_stack = Vec::new();
+        ctx.swap_stack(&mut old_stack);
+        ctx.push_fname(bind_var.clone());
+
+        cat!(ctx, "let {bind_var}: any = {{}};\n");
+
+        Some(old_stack)
+    } else {
+        None
+    };
+
     for f in &ty.fields {
         ctx.push_fname(f.name);
         let fty = &*f.r#type.borrow();
 
         use check::ResolvedType::*;
-        let mut init_item = false;
+        let mut init_struct = false;
         let mut generator: Rc<dyn Fn(&mut GenCtx)> = match &fty.1 {
             Builtin(fty_info) => Rc::new(move |ctx| gen_read_impl_builtin(ctx, &fty_info, &fty.0)),
             Enum(fty_info) => Rc::new(move |ctx| gen_read_impl_enum(ctx, &fty_info, &fty.0)),
             Struct(fty_info) => {
-                init_item = true;
-                Rc::new(move |ctx| gen_read_impl_struct(ctx, &fty_info, &fty.0))
+                init_struct = true;
+                Rc::new(move |ctx| gen_read_impl_struct(ctx, &fty_info, &fty.0, !f.array))
             }
         };
         if f.array {
             let current_generator = generator.clone();
-            generator = Rc::new(move |ctx| gen_read_impl_array(ctx, init_item, |ctx| current_generator(ctx)))
+            generator = Rc::new(move |ctx| gen_read_impl_array(ctx, init_struct, |ctx| current_generator(ctx)))
         }
         if f.optional {
             let current_generator = generator.clone();
-            generator = Rc::new(move |ctx| gen_read_impl_optional(ctx, init_item, |ctx| current_generator(ctx)))
+            generator = Rc::new(move |ctx| gen_read_impl_optional(ctx, |ctx| current_generator(ctx)))
         }
         generator(ctx);
         ctx.pop_fname();
+    }
+
+    if let Some(mut old_stack) = old_stack {
+        cat!(ctx, "{fname} = {bind_var};\n");
+
+        ctx.swap_stack(&mut old_stack);
     }
 }
 
@@ -274,7 +270,7 @@ impl Impl for TypeScript {
         cat!(ctx +++);
         cat!(ctx, "let reader = new Reader(data);\n");
         cat!(ctx, "let output = Object.create({export.name});\n");
-        gen_read_impl_struct(&mut ctx, &export.r#struct, &export.name);
+        gen_read_impl_struct(&mut ctx, &export.r#struct, &export.name, false);
         cat!(ctx, "if (reader.failed) return null;\n");
         cat!(ctx, "return output;\n");
         cat!(ctx ---);
@@ -643,7 +639,7 @@ export class Test {
             let output_b_len = reader.read_uint32();
             output.b = new Array(output_b_len);
             for (let output_b_index = 0; output_b_index < output_b_len; ++output_b_index) {
-                let output_b_item;
+                let output_b_item: any = undefined;
                 output_b_item = reader.read_uint8();
                 output.b[output_b_index] = output_b_item;
             }
@@ -735,14 +731,14 @@ export class TestB {
             let output_test_a_item_first_len = reader.read_uint32();
             output_test_a_item.first = new Array(output_test_a_item_first_len);
             for (let output_test_a_item_first_index = 0; output_test_a_item_first_index < output_test_a_item_first_len; ++output_test_a_item_first_index) {
-                let output_test_a_item_first_item;
+                let output_test_a_item_first_item: any = undefined;
                 output_test_a_item_first_item = reader.read_uint8();
                 output_test_a_item.first[output_test_a_item_first_index] = output_test_a_item_first_item;
             }
             let output_test_a_item_second_len = reader.read_uint32();
             output_test_a_item.second = new Array(output_test_a_item_second_len);
             for (let output_test_a_item_second_index = 0; output_test_a_item_second_index < output_test_a_item_second_len; ++output_test_a_item_second_index) {
-                let output_test_a_item_second_item;
+                let output_test_a_item_second_item: any = undefined;
                 output_test_a_item_second_item = reader.read_uint8();
                 output_test_a_item.second[output_test_a_item_second_index] = output_test_a_item_second_item;
             }
@@ -898,7 +894,7 @@ export class Test {
         let output_builtin_array_len = reader.read_uint32();
         output.builtin_array = new Array(output_builtin_array_len);
         for (let output_builtin_array_index = 0; output_builtin_array_index < output_builtin_array_len; ++output_builtin_array_index) {
-            let output_builtin_array_item;
+            let output_builtin_array_item: any = undefined;
             output_builtin_array_item = reader.read_uint8();
             output.builtin_array[output_builtin_array_index] = output_builtin_array_item;
         }
@@ -907,7 +903,7 @@ export class Test {
         let output_string_array_len = reader.read_uint32();
         output.string_array = new Array(output_string_array_len);
         for (let output_string_array_index = 0; output_string_array_index < output_string_array_len; ++output_string_array_index) {
-            let output_string_array_item;
+            let output_string_array_item: any = undefined;
             let output_string_array_item_len = reader.read_uint32();
             output_string_array_item = reader.read_string(output_string_array_item_len);
             output.string_array[output_string_array_index] = output_string_array_item;
@@ -918,14 +914,16 @@ export class Test {
         let output_enum_array_len = reader.read_uint32();
         output.enum_array = new Array(output_enum_array_len);
         for (let output_enum_array_index = 0; output_enum_array_index < output_enum_array_len; ++output_enum_array_index) {
-            let output_enum_array_item;
+            let output_enum_array_item: any = undefined;
             let output_enum_array_item_temp = reader.read_uint8();
             if (1 <= output_enum_array_item_temp && output_enum_array_item_temp <= 2) output_enum_array_item = output_enum_array_item_temp;
             else reader.failed = true;
             output.enum_array[output_enum_array_index] = output_enum_array_item;
         }
-        output.struct_scalar.x = reader.read_float();
-        output.struct_scalar.y = reader.read_float();
+        let output_struct_scalar: any = {};
+        output_struct_scalar.x = reader.read_float();
+        output_struct_scalar.y = reader.read_float();
+        output.struct_scalar = output_struct_scalar;
         let output_struct_array_len = reader.read_uint32();
         output.struct_array = new Array(output_struct_array_len);
         for (let output_struct_array_index = 0; output_struct_array_index < output_struct_array_len; ++output_struct_array_index) {
